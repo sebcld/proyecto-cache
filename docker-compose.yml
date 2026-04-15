@@ -1,0 +1,98 @@
+version: "3.9"
+
+services:
+  # ── Redis: Sistema de caché ────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cache-redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+        --maxmemory 200mb
+        --maxmemory-policy allkeys-lru
+        --save ""
+        --appendonly no
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - cache-net
+
+  # ── App: Generador de tráfico + Query Engine + Caché + Métricas ────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cache-app
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATASET_PATH=data/967_buildings.csv
+      - TRAFFIC_DISTRIBUTION=zipf
+      - TOTAL_QUERIES=1000
+      - QUERIES_PER_SECOND=50
+      - CACHE_MAX_MEMORY=200mb
+      - CACHE_EVICTION_POLICY=allkeys-lru
+      - CACHE_TTL_SECONDS=60
+      - METRICS_OUTPUT_DIR=metrics/results
+    volumes:
+      - ./metrics:/app/metrics
+      - ./data:/app/data:ro
+    networks:
+      - cache-net
+    command: ["python", "main.py", "--flush"]
+
+  # ── Gráficos: genera plots a partir de los resultados ────────────────────
+  plots:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cache-plots
+    profiles: ["plots"]
+    volumes:
+      - ./metrics:/app/metrics
+    command: >
+      python plot_results.py
+        --input metrics/experiments
+        --output metrics/plots
+        --format png
+
+  # ── Experimentos: ejecuta todas las combinaciones ──────────────────────────
+  experiments:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cache-experiments
+    profiles: ["experiments"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATASET_PATH=data/967_buildings.csv
+    volumes:
+      - ./metrics:/app/metrics
+      - ./data:/app/data:ro
+    networks:
+      - cache-net
+    command: >
+      python run_experiments.py
+        --total 1000
+        --qps 0
+        --output-dir metrics/experiments
+
+volumes:
+  redis-data:
+
+networks:
+  cache-net:
+    driver: bridge
