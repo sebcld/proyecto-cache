@@ -36,14 +36,21 @@ from traffic_generator.generator import TrafficGenerator
 
 DISTRIBUTIONS   = ["zipf", "uniform"]
 EVICTION_POLICIES = ["allkeys-lru", "allkeys-lfu", "allkeys-random"]
+# Sizes requeridos por el enunciado. Con el catálogo expandido + payloads
+# inflados, ~1030 entradas ocupan >50 MB, así que 50mb fuerza evicciones
+# reales y 200/500 mb muestran el régimen sin presión.
 CACHE_SIZES     = ["50mb", "200mb", "500mb"]
-TTL_VALUES      = [30, 60, 120]
+# TTL bajo para que expiraciones ocurran durante la simulación (~5s a ~1000 qps).
+# TTL=2s → entradas expiran ~2.5 veces durante la corrida → re-misses visibles.
+# TTL=10s → expiran ~0.5 veces → impacto intermedio.
+# TTL=300s → sin expiraciones → línea base de evicción pura.
+TTL_VALUES      = [2, 10, 300]
 
 # Para modo --quick
 QUICK_DISTRIBUTIONS = ["zipf", "uniform"]
 QUICK_POLICIES      = ["allkeys-lru", "allkeys-lfu"]
 QUICK_SIZES         = ["50mb", "200mb"]
-QUICK_TTLS          = [60]
+QUICK_TTLS          = [2, 300]
 
 
 def run_single_experiment(engine, redis_client, distribution, eviction_policy,
@@ -118,7 +125,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--quick", action="store_true",
                         help="Ejecutar subconjunto rápido de experimentos")
-    parser.add_argument("--total", type=int, default=1000,
+    parser.add_argument("--total", type=int, default=5000,
                         help="Consultas por experimento")
     parser.add_argument("--qps", type=float, default=0,
                         help="QPS (0=sin límite)")

@@ -52,6 +52,34 @@ def _wrap(query_type: str, cache_key: str, result: Any,
     }
 
 
+# Número de registros de ejemplo incluidos en la respuesta para inflar el
+# payload y que los límites de maxmemory (50/200/500 MB) sean relevantes.
+# Con ~600 registros por entrada y payload ~60 KB → catálogo (~1030) supera 50 MB.
+SAMPLE_RECORDS_PER_RESPONSE = 1000
+SAMPLE_RECORDS_PER_ZONE_Q4  = 300
+SAMPLE_RECORDS_PER_BUCKET   = 100
+
+
+def _sample_records(df: pd.DataFrame, n: int) -> list[dict]:
+    """Toma los primeros n registros del DataFrame como 'muestra' determinista.
+
+    Se serializan lat/lon/area/confidence. Es determinista para que la misma
+    consulta siempre produzca el mismo payload (y pueda haber cache hits).
+    """
+    if df.empty or n <= 0:
+        return []
+    sub = df.head(n)
+    return [
+        {
+            "lat":  round(float(r.latitude), 6),
+            "lon":  round(float(r.longitude), 6),
+            "area": round(float(r.area_in_meters), 3),
+            "conf": round(float(r.confidence), 4),
+        }
+        for r in sub.itertuples(index=False)
+    ]
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Motor de consultas
 # ──────────────────────────────────────────────────────────────────────────────
@@ -122,11 +150,13 @@ class QueryEngine:
 
         df      = _filter_confidence(self._data[zone_id], confidence_min)
         count   = len(df)
+        sample  = _sample_records(df, SAMPLE_RECORDS_PER_RESPONSE)
 
         elapsed = (time.perf_counter() - t0) * 1000
         cache_key = f"count:{zone_id}:conf={confidence_min}"
 
-        return _wrap("Q1", cache_key, {"count": count}, elapsed)
+        return _wrap("Q1", cache_key,
+                     {"count": count, "sample": sample}, elapsed)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Q2 — Área promedio y total de edificaciones
@@ -154,12 +184,13 @@ class QueryEngine:
         n     = len(areas)
 
         if n == 0:
-            result = {"avg_area": 0.0, "total_area": 0.0, "n": 0}
+            result = {"avg_area": 0.0, "total_area": 0.0, "n": 0, "sample": []}
         else:
             result = {
                 "avg_area":   float(areas.mean()),
                 "total_area": float(areas.sum()),
                 "n":          n,
+                "sample":     _sample_records(df, SAMPLE_RECORDS_PER_RESPONSE),
             }
 
         elapsed   = (time.perf_counter() - t0) * 1000
@@ -198,6 +229,7 @@ class QueryEngine:
             "density_per_km2": round(density, 4),
             "count":           count,
             "area_km2":        round(area_km2, 4),
+            "sample":          _sample_records(df, SAMPLE_RECORDS_PER_RESPONSE),
         }
 
         elapsed   = (time.perf_counter() - t0) * 1000
@@ -244,6 +276,7 @@ class QueryEngine:
                 "density_per_km2": round(density, 4),
                 "count":           count,
                 "area_km2":        round(area_km2, 4),
+                "sample":          _sample_records(df, SAMPLE_RECORDS_PER_ZONE_Q4),
             }
 
         da = _density_raw(zone_a)
@@ -293,18 +326,23 @@ class QueryEngine:
 
         t0 = time.perf_counter()
 
-        scores = self._data[zone_id]["confidence"].to_numpy()
+        df_zone = self._data[zone_id]
+        scores  = df_zone["confidence"].to_numpy()
         counts, edges = np.histogram(scores, bins=bins, range=(0.0, 1.0))
 
-        distribution = [
-            {
+        distribution = []
+        for i in range(bins):
+            lo, hi = float(edges[i]), float(edges[i + 1])
+            bucket_df = df_zone[
+                (df_zone["confidence"] >= lo) & (df_zone["confidence"] < hi)
+            ]
+            distribution.append({
                 "bucket": i,
-                "min":    round(float(edges[i]),   4),
-                "max":    round(float(edges[i + 1]), 4),
+                "min":    round(lo, 4),
+                "max":    round(hi, 4),
                 "count":  int(counts[i]),
-            }
-            for i in range(bins)
-        ]
+                "sample": _sample_records(bucket_df, SAMPLE_RECORDS_PER_BUCKET),
+            })
 
         result = {
             "bins":  distribution,

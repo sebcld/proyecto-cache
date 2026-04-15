@@ -1,14 +1,4 @@
 """
-loader.py — Carga y partición del dataset Google Open Buildings
-Región Metropolitana de Santiago
-
-Al iniciar el sistema, este módulo:
-  1. Lee el CSV desde disco
-  2. Retiene sólo las columnas relevantes
-  3. Filtra y particiona los registros en las 5 zonas predefinidas
-  4. Precalcula el área (km²) de cada bounding box
-  5. Retorna todo en memoria para que Q1–Q5 operen sin base de datos
-
 Uso:
     from data.loader import load_dataset, ZONES, ZONE_AREAS_KM2
     data = load_dataset("data/967_buildings.csv")

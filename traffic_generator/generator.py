@@ -19,6 +19,7 @@ from typing import Generator
 import numpy as np
 
 from data.loader import ZONES
+from config import CONFIDENCE_VALUES, BINS_VALUES
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -27,8 +28,13 @@ from data.loader import ZONES
 
 ZONE_IDS = list(ZONES.keys())  # ["Z1", "Z2", "Z3", "Z4", "Z5"]
 QUERY_TYPES = ["Q1", "Q2", "Q3", "Q4", "Q5"]
-CONFIDENCE_VALUES = [0.0, 0.3, 0.5, 0.7, 0.9]
-BINS_VALUES = [3, 5, 10]
+
+# CONFIDENCE_VALUES y BINS_VALUES se importan desde config.py (fuente única).
+# Tamaño total del catálogo con 60 umbrales:
+#   Q1+Q2+Q3: 5 zonas × 60 conf × 3 = 900
+#   Q4:       C(5,2)=10 pares × 60 conf = 600
+#   Q5:       5 zonas × 6 bins = 30
+#   TOTAL = 1530 consultas únicas
 
 
 def _build_query_catalog() -> list[dict]:

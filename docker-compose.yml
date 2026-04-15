@@ -37,11 +37,11 @@ services:
       - REDIS_PORT=6379
       - DATASET_PATH=data/967_buildings.csv
       - TRAFFIC_DISTRIBUTION=zipf
-      - TOTAL_QUERIES=1000
-      - QUERIES_PER_SECOND=50
-      - CACHE_MAX_MEMORY=200mb
+      - TOTAL_QUERIES=5000
+      - QUERIES_PER_SECOND=0
+      - CACHE_MAX_MEMORY=50mb
       - CACHE_EVICTION_POLICY=allkeys-lru
-      - CACHE_TTL_SECONDS=60
+      - CACHE_TTL_SECONDS=2
       - METRICS_OUTPUT_DIR=metrics/results
     volumes:
       - ./metrics:/app/metrics
@@ -86,7 +86,7 @@ services:
       - cache-net
     command: >
       python run_experiments.py
-        --total 1000
+        --total 5000
         --qps 0
         --output-dir metrics/experiments
 

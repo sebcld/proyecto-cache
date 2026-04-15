@@ -27,8 +27,10 @@ CACHE_MAX_MEMORY = os.getenv("CACHE_MAX_MEMORY", "200mb")
 # Política de evicción: allkeys-lru | allkeys-lfu | allkeys-random (FIFO-like)
 CACHE_EVICTION_POLICY = os.getenv("CACHE_EVICTION_POLICY", "allkeys-lru")
 
-# TTL por defecto en segundos para las entradas de caché
-CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 60))
+# TTL por defecto en segundos para las entradas de caché.
+# Se usa un TTL alto para que la presión sobre el caché venga
+# de la política de evicción (maxmemory), NO de expiraciones por tiempo.
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 300))
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Generador de Tráfico
@@ -39,17 +41,19 @@ TRAFFIC_DISTRIBUTION = os.getenv("TRAFFIC_DISTRIBUTION", "zipf")
 # Parámetro 's' de la distribución Zipf (> 1.0 = más concentrado)
 ZIPF_PARAM = float(os.getenv("ZIPF_PARAM", 1.5))
 
-# Número total de consultas a generar en la simulación
-TOTAL_QUERIES = int(os.getenv("TOTAL_QUERIES", 1000))
+# Número total de consultas a generar en la simulación.
+# Debe ser varias veces mayor que el tamaño del catálogo (~1030)
+# para que las distribuciones Zipf vs uniform se diferencien.
+TOTAL_QUERIES = int(os.getenv("TOTAL_QUERIES", 5000))
 
 # Tasa de consultas por segundo (0 = sin throttling)
-QUERIES_PER_SECOND = float(os.getenv("QUERIES_PER_SECOND", 50))
+QUERIES_PER_SECOND = float(os.getenv("QUERIES_PER_SECOND", 0))
 
-# Valores posibles de confidence_min para las consultas
-CONFIDENCE_VALUES = [0.0, 0.3, 0.5, 0.7, 0.9]
-
-# Valores posibles de bins para Q5
-BINS_VALUES = [3, 5, 10]
+# Umbrales de confianza y bins usados para construir el catálogo de consultas.
+# Fuente de verdad única: generator.py los importa desde aquí.
+import numpy as _np
+CONFIDENCE_VALUES = [round(v, 3) for v in _np.linspace(0.0, 0.95, 60)]
+BINS_VALUES = [3, 5, 8, 10, 15, 20]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Métricas

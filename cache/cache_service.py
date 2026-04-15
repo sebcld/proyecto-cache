@@ -44,8 +44,10 @@ class CacheService:
         self._metrics = metrics
         self._ttl = ttl
 
-        # Rastrear claves para medir evictions
-        self._known_keys: set = set()
+        # Captura el baseline del contador acumulado de Redis para calcular
+        # el delta por experimento (flushdb no resetea este contador).
+        info = self._redis.info("stats")
+        self._evicted_keys_baseline = info.get("evicted_keys", 0)
 
     # ── Configuración de Redis ───────────────────────────────────────────────
 
@@ -199,6 +201,13 @@ class CacheService:
         }
 
     def get_redis_evicted_keys(self) -> int:
-        """Retorna el número total de claves eviccionadas reportadas por Redis."""
+        """
+        Retorna el número de claves eviccionadas por Redis en este experimento.
+
+        Lee el delta respecto al valor capturado al inicializar el servicio,
+        ya que el contador 'evicted_keys' de Redis es acumulado desde que
+        arrancó el servidor y flushdb() no lo resetea.
+        """
         info = self._redis.info("stats")
-        return info.get("evicted_keys", 0)
+        current = info.get("evicted_keys", 0)
+        return current - self._evicted_keys_baseline
