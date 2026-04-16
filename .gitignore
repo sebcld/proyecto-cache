@@ -11,8 +11,7 @@ __pycache__/
 
 data/*.csv
 metrics/results/
-metrics/experiments/
-metrics/plots/
+
 
 .pytest_cache/
 .mypy_cache/

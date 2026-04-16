@@ -1,0 +1,67 @@
+{
+  "total_queries": 5000,
+  "hits": 1127,
+  "misses": 3873,
+  "hit_rate": 0.2254,
+  "miss_rate": 0.7746,
+  "throughput_qps": 239.47,
+  "latency_p50_ms": 4.3896,
+  "latency_p95_ms": 5.5252,
+  "avg_hit_latency_ms": 0.8273,
+  "avg_miss_latency_ms": 4.5735,
+  "evictions": 140,
+  "eviction_rate_per_min": 402.31,
+  "cache_efficiency": -3.3561,
+  "elapsed_seconds": 20.88,
+  "per_query": {
+    "Q1": {
+      "total": 1028,
+      "hits": 241,
+      "misses": 787,
+      "hit_rate": 0.2344,
+      "latency_p50_ms": 4.58,
+      "latency_p95_ms": 5.5665
+    },
+    "Q2": {
+      "total": 968,
+      "hits": 212,
+      "misses": 756,
+      "hit_rate": 0.219,
+      "latency_p50_ms": 4.7598,
+      "latency_p95_ms": 5.5802
+    },
+    "Q3": {
+      "total": 984,
+      "hits": 229,
+      "misses": 755,
+      "hit_rate": 0.2327,
+      "latency_p50_ms": 4.6,
+      "latency_p95_ms": 5.4363
+    },
+    "Q4": {
+      "total": 1912,
+      "hits": 421,
+      "misses": 1491,
+      "hit_rate": 0.2202,
+      "latency_p50_ms": 3.8212,
+      "latency_p95_ms": 4.9751
+    },
+    "Q5": {
+      "total": 108,
+      "hits": 24,
+      "misses": 84,
+      "hit_rate": 0.2222,
+      "latency_p50_ms": 5.6363,
+      "latency_p95_ms": 11.9108
+    }
+  },
+  "experiment": {
+    "distribution": "uniform",
+    "eviction_policy": "allkeys-lfu",
+    "cache_size": "500mb",
+    "ttl": 2,
+    "total_queries": 5000,
+    "qps": 0.0
+  },
+  "redis_evicted_keys": 0
+}

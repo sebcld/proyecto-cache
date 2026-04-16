@@ -1,0 +1,3 @@
+github no permite subir archivos grandes, adjunto link de descarga del csv
+
+https://storage.googleapis.com/open-buildings-data/v3/polygons_s2_level_4_gzip/967_buildings.csv.gz
