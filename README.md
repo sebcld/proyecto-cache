@@ -1,6 +1,6 @@
 # Plataforma de Análisis de Caché — Sistemas Distribuidos 2026-1
 
-Sistema distribuido de análisis geoespacial con caché Redis para el dataset Google Open Buildings (Región Metropolitana de Santiago).
+Sistema distribuido de análisis geoespacial con caché Redis para el dataset Google Open Buildings (Santiago Región Metropolitana).
 
 ## Arquitectura
 
