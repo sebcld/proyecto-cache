@@ -1,0 +1,163 @@
+# docker-compose.kafka.yml — Override para la arquitectura asincrona (Tarea 2)
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.kafka.yml up --build
+#
+# Levanta los servicios adicionales:
+#   - kafka       (broker uniico en modo KRaft, sin Zookeeper)
+#   - kafka-init  (one-shot: crea los 3 topicos)
+#   - kafka-ui    (perfil "tools", opcional, en :8080)
+#
+# La Tarea 1 (docker-compose.yml) sigue funcionando sin modificaciones:
+#   - `docker compose up` levanta solo redis + app (Tarea 1)
+#   - `docker compose -f ... -f docker-compose.kafka.yml up` levanta todo
+
+services:
+
+  #  Apache Kafka en modo KRaft sin Zookeeper
+  # Imagen oficial Apache 3.7+ soporta KRaft.
+  # Listeners:
+  #   PLAINTEXT      -> trfico interno entre contenedores (kafka:9092)
+  #   PLAINTEXT_HOST -> acceso desde el host para debugging (localhost:9094)
+  #   CONTROLLER     -> quorum interno KRaft (no expuesto)
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: kafka-broker
+    ports:
+      - "9094:9094"
+    environment:
+      # Identidad del nodo en el quum KRaft (unico nodo, id=1).
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+
+      # Listeners
+      KAFKA_LISTENERS: "CONTROLLER://:9093,PLAINTEXT://:9092,PLAINTEXT_HOST://:9094"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # Replicacion = 1 porque hay un solo broker.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+
+      # Rebalanceo inmediato del grupo (mejora demo de escalado horizontal).
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # Cluster ID fijo (cualquier UUID base64 de 22 chars sirve).
+      # Mantenerlo fijo evita re-formatear el storage entre reinicios.
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - cache-net
+
+  # Creacion de tpicos 
+  # Se ejecuta una vez al arranque.si ya existen, no falla.
+  kafka-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kafka-init
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    networks:
+      - cache-net
+    command: ["python", "-m", "kafka_layer.topics"]
+
+  #  Producer: genera trafico -> publica en `queries` 
+  #
+  # Las variables de entorno controlan distribucion, total, QPS y spike.
+  # Si SPIKE_QPS y SPIKE_DURATION_S > 0, se activa la ventana de spike.
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kafka-producer
+    profiles: ["producer"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - DISTRIBUTION=${DISTRIBUTION:-zipf}
+      - TOTAL_QUERIES=${TOTAL_QUERIES:-5000}
+      - QPS=${QPS:-50}
+      - SPIKE_QPS=${SPIKE_QPS:-0}
+      - SPIKE_DURATION_S=${SPIKE_DURATION_S:-0}
+      - SPIKE_START_S=${SPIKE_START_S:-5}
+    networks:
+      - cache-net
+    command: ["python", "-m", "kafka_layer.producer"]
+
+  #  Consumer (worker escalable) 
+  # Worker que consume de queries + queries.retry, procesa via la cache
+  # Redis de la Tarea 1, y enruta fallos a retry/DLQ.
+  #
+  # NO lleva container_name -> permite escalar horizontalmente:
+  #   docker compose -f docker-compose.yml -f docker-compose.kafka.yml \
+  #     up --build --scale consumer=4
+  #
+  # Todos comparten group.id (CONSUMER_GROUP) -> Kafka reparte las particiones.
+  # Las variables de inyeccion de fallos se afinan por escenario (Fase 4).
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATASET_PATH=data/967_buildings.csv
+      - CACHE_TTL_SECONDS=${CACHE_TTL_SECONDS:-300}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - FAIL_RATE=${FAIL_RATE:-0.0}
+      - ARTIFICIAL_LATENCY_MS=${ARTIFICIAL_LATENCY_MS:-0}
+      - RESPONSES_DOWN=${RESPONSES_DOWN:-false}
+    volumes:
+      - ./data:/app/data:ro
+    networks:
+      - cache-net
+    command: ["python", "-m", "kafka_layer.consumer"]
+
+  #  Kafka UI ( perfil "tools") 
+  # Acceso web a topics, mensajes, consumer lag, etc.
+  #   docker compose -f ... -f docker-compose.kafka.yml --profile tools up
+  # Luego abrir http://localhost:8080
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    profiles: ["tools"]
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - cache-net
+
+volumes:
+  kafka-data:
