@@ -55,6 +55,18 @@ FAIL_RATE = float(os.getenv("FAIL_RATE", 0.0))
 # Latencia artificial añadida al procesamiento (ms).
 ARTIFICIAL_LATENCY_MS = float(os.getenv("ARTIFICIAL_LATENCY_MS", 0))
 
-# Si es True, el Generador de Respuestas se considera caido: TODAS las consultas con cache miss fallan inmediatamente. Sirve para simular la
-# caida total del backend (escenario 4 del enunciado).
+# Todos los fallos se inyectan en el camino del cache MISS (Generador de
+# Respuestas). Los cache HIT NUNCA fallan: Redis sigue sirviendo lo que ya
+# tiene, reflejando que la cache amortigua la caida del backend.
+
+# Caida PERMANENTE: el Generador de Respuestas falla durante todo el run.
 RESPONSES_DOWN = os.getenv("RESPONSES_DOWN", "false").lower() == "true"
+
+# Caida TEMPORAL (escenario "falla temporal")
+BACKEND_DOWN_START_S    = float(os.getenv("BACKEND_DOWN_START_S", 0))
+BACKEND_DOWN_DURATION_S = float(os.getenv("BACKEND_DOWN_DURATION_S", 0))
+
+# Backoff entre reintentos: al consumir de queries.retry, el worker espera a
+# que hayan pasado al menos RETRY_BACKOFF_S desde last_attempt_at antes de
+# reprocesar.
+RETRY_BACKOFF_S = float(os.getenv("RETRY_BACKOFF_S", 2.0))

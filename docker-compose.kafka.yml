@@ -8,14 +8,9 @@
 #   - kafka-init  (one-shot: crea los 3 topicos)
 #   - kafka-ui    (perfil "tools", opcional, en :8080)
 #
-# La Tarea 1 (docker-compose.yml) sigue funcionando sin modificaciones:
-#   - `docker compose up` levanta solo redis + app (Tarea 1)
-#   - `docker compose -f ... -f docker-compose.kafka.yml up` levanta todo
-
 services:
 
-  #  Apache Kafka en modo KRaft sin Zookeeper
-  # Imagen oficial Apache 3.7+ soporta KRaft.
+
   # Listeners:
   #   PLAINTEXT      -> trfico interno entre contenedores (kafka:9092)
   #   PLAINTEXT_HOST -> acceso desde el host para debugging (localhost:9094)
@@ -134,6 +129,9 @@ services:
       - FAIL_RATE=${FAIL_RATE:-0.0}
       - ARTIFICIAL_LATENCY_MS=${ARTIFICIAL_LATENCY_MS:-0}
       - RESPONSES_DOWN=${RESPONSES_DOWN:-false}
+      - BACKEND_DOWN_START_S=${BACKEND_DOWN_START_S:-0}
+      - BACKEND_DOWN_DURATION_S=${BACKEND_DOWN_DURATION_S:-0}
+      - RETRY_BACKOFF_S=${RETRY_BACKOFF_S:-2.0}
     volumes:
       - ./data:/app/data:ro
     networks:

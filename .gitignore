@@ -11,7 +11,9 @@ __pycache__/
 
 data/*.csv
 metrics/results/
-
+metrics/kafka_experiments/
+metrics/plots/
+otros/
 
 .pytest_cache/
 .mypy_cache/

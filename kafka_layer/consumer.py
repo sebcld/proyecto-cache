@@ -19,10 +19,10 @@ Manejo de fallos (retry / DLQ):
   - En ambos casos se hace commit del offset original: el mensaje ya fue
     "enrutado" a su siguiente destino, no debe reprocesarse desde aqui.
 
-Inyeccion de fallos (config por envv)
-  - FAIL_RATE             -> probabilidad de fallo aleatorio por consulta.
-  - RESPONSES_DOWN        -> fuerza fallo de todo  procesamiento (backend caido).
-  - ARTIFICIAL_LATENCY_MS -> latencia extra antes de procesar.
+Inyeccion de fallos (ver kafka_layer/faults.py): se aplica solo en el camino
+del cache MISS (Generador de Respuestas), nunca en los HIT. Configurable por
+env: FAIL_RATE, RESPONSES_DOWN, ARTIFICIAL_LATENCY_MS y la ventana de caida
+temporal BACKEND_DOWN_START_S / BACKEND_DOWN_DURATION_S.
 
 Uso:
     python -m kafka_layer.consumer
@@ -32,7 +32,6 @@ Uso:
 import os
 import sys
 import time
-import random
 import signal
 
 import redis
@@ -43,8 +42,10 @@ from kafka_config import (
     TOPIC_QUERIES, TOPIC_RETRY, TOPIC_DLQ,
     CONSUMER_GROUP, MAX_RETRIES,
     FAIL_RATE, ARTIFICIAL_LATENCY_MS, RESPONSES_DOWN,
+    BACKEND_DOWN_START_S, BACKEND_DOWN_DURATION_S, RETRY_BACKOFF_S,
 )
 from kafka_layer.message import QueryMessage
+from kafka_layer.faults import FaultInjector, FaultyEngine
 
 from config import (
     DATASET_PATH, REDIS_HOST, REDIS_PORT, REDIS_DB,
@@ -88,31 +89,6 @@ def make_producer() -> Producer:
     })
 
 
-
-# Inyeccion de fallos 
-
-class ProcessingError(Exception):
-    """Error simulado de procesamiento (para ejercitar retry/DLQ)."""
-
-
-def _maybe_inject_fault() -> None:
-    """
-    Aplica latencia artificial y, si corresponde, lanza ProcessingError.
-
-    Se invoca ANTES de tocar la cache para simular un backend degradado o
-    caido. La lógica fina (caida solo del Generador de Respuestas, ventanas
-    temporales.
-    """
-    if ARTIFICIAL_LATENCY_MS > 0:
-        time.sleep(ARTIFICIAL_LATENCY_MS / 1000.0)
-
-    if RESPONSES_DOWN:
-        raise ProcessingError("RESPONSES_DOWN: backend de respuestas caido")
-
-    if FAIL_RATE > 0 and random.random() < FAIL_RATE:
-        raise ProcessingError(f"fallo aleatorio (FAIL_RATE={FAIL_RATE})")
-
-
 # Worker
 
 
@@ -121,10 +97,21 @@ class ConsumerWorker:
         self.worker_id = os.getenv("HOSTNAME", f"worker-{os.getpid()}")
         self._running = True
 
-        #  Dependencias de la Tarea 1 
+        #  Dependencias de la Tarea 1
         print(f"[consumer:{self.worker_id}] Cargando dataset...")
         data = load_dataset(DATASET_PATH, verbose=False)
         engine = QueryEngine(data, ZONE_AREAS_KM2)
+
+        # Inyeccion de fallos: envuelve el motor para que SOLO los cache MISS
+        # puedan fallar (los HIT se sirven desde Redis sin tocar el motor).
+        self._faults = FaultInjector(
+            fail_rate=FAIL_RATE,
+            responses_down=RESPONSES_DOWN,
+            latency_ms=ARTIFICIAL_LATENCY_MS,
+            down_start_s=BACKEND_DOWN_START_S,
+            down_duration_s=BACKEND_DOWN_DURATION_S,
+        )
+        engine = FaultyEngine(engine, self._faults)
 
         self._redis = redis.Redis(
             host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB,
@@ -169,7 +156,7 @@ class ConsumerWorker:
     def _handle(self, msg: QueryMessage) -> None:
         """Procesa una consulta; en caso de fallo la enruta a retry/DLQ."""
         try:
-            _maybe_inject_fault()
+            # El fallo se inyecta dentro del motor (solo en cache MISS).
             self._cache.process_query(msg.query_type, **msg.params)
             self._redis.incr("metrics:processed")
             if msg.retry_count > 0:
@@ -184,10 +171,8 @@ class ConsumerWorker:
         self._consumer.subscribe([TOPIC_QUERIES, TOPIC_RETRY])
         print(f"[consumer:{self.worker_id}] Suscrito a "
               f"[{TOPIC_QUERIES}, {TOPIC_RETRY}] group={CONSUMER_GROUP}")
-        if FAIL_RATE or RESPONSES_DOWN or ARTIFICIAL_LATENCY_MS:
-            print(f"[consumer:{self.worker_id}] Fallos: FAIL_RATE={FAIL_RATE} "
-                  f"RESPONSES_DOWN={RESPONSES_DOWN} "
-                  f"LATENCY_MS={ARTIFICIAL_LATENCY_MS}")
+        print(f"[consumer:{self.worker_id}] Fallos: {self._faults.describe()} "
+              f"| retry_backoff={RETRY_BACKOFF_S}s")
 
         try:
             while self._running:
@@ -210,6 +195,15 @@ class ConsumerWorker:
                           f"descartado: {e}", file=sys.stderr)
                     self._consumer.commit(record, asynchronous=False)
                     continue
+
+                # Backoff de reintentos: si el mensaje viene de queries.retry,
+                # esperamos a que pasen RETRY_BACKOFF_S desde el ultimo intento
+                # antes de reprocesar. Asi un mensaje que fallo durante una
+                # caida temporal tiene chance de recuperarse cuando esta cierre.
+                if record.topic() == TOPIC_RETRY and RETRY_BACKOFF_S > 0:
+                    delay = RETRY_BACKOFF_S - (time.time() - msg.last_attempt_at)
+                    if delay > 0:
+                        time.sleep(min(delay, RETRY_BACKOFF_S))
 
                 self._handle(msg)
 

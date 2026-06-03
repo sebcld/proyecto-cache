@@ -121,140 +121,141 @@ docker compose --profile experiments run --rm experiments
 docker compose --profile plots run --rm plots
 ```
 
-## Ejecución Local (sin Docker)
+---
+
+# Tarea 2 — Arquitectura Asíncrona con Apache Kafka
+
+La Tarea 2 introduce una **capa de mensajería asíncrona** entre el Generador de
+Tráfico y el procesamiento, usando Apache Kafka. La Tarea 1 **no se modifica**:
+el motor de consultas y la caché Redis se reutilizan tal cual (solo se importan).
+
+## ¿Cómo funciona?
+
+En vez de que el generador llame directo a la caché (modo síncrono de la Tarea 1),
+ahora **publica cada consulta como un mensaje** en Kafka, y un grupo de *consumers*
+las procesa de forma independiente y escalable.
+
+```
+                          ┌──────────── tópico: queries ───────────┐
+┌──────────────┐ publica  │  [p0][p1][p2][p3][p4][p5][p6][p7]       │
+│  Producer    │─────────▶│         (8 particiones)                 │
+│ (TrafficGen) │          └────────────────┬────────────────────────┘
+└──────────────┘                           │ consume (group.id compartido)
+                                ┌───────────▼───────────┐
+                                │   Consumers (1..N)     │  cache HIT ─▶ Redis
+                                │   procesan vía la      │  cache MISS ─▶ QueryEngine
+                                │   caché de la Tarea 1  │
+                                └───────┬───────┬────────┘
+                          fallo (MISS)  │       │ éxito → commit manual del offset
+                       ┌────────────────▼─┐   ┌─▼────────────────────┐
+                       │ tópico:           │   │ métricas compartidas │
+                       │ queries.retry     │   │ en Redis             │
+                       │ (reintentos)      │   └──────────────────────┘
+                       └────────┬──────────┘
+                  retry_count ≥ MAX_RETRIES
+                                ▼
+                       ┌───────────────────┐
+                       │ tópico: queries.dlq│  (dead-letter queue)
+                       └───────────────────┘
+```
+
+**Componentes clave:**
+
+- **Producer** (`kafka_layer/producer.py`): reutiliza el `TrafficGenerator` y publica
+  en `queries`. Soporta **modo spike** (QPS dinámico) y entrega idempotente (`acks=all`).
+- **3 tópicos**: `queries` (flujo principal, 8 particiones), `queries.retry`
+  (reintentos, 8 particiones), `queries.dlq` (mensajes agotados, 1 partición).
+- **Consumers** (`kafka_layer/consumer.py`): comparten `group.id` → Kafka reparte
+  las particiones automáticamente (**escalado horizontal**). Procesan vía la caché
+  de la Tarea 1 y hacen **commit manual** del offset tras procesar (*at-least-once*).
+- **Retry / DLQ**: si una consulta falla, se republica en `queries.retry` con
+  `retry_count+1` (preservando `query_id`); tras `MAX_RETRIES` fallos va a `queries.dlq`.
+- **Inyección de fallos** (`kafka_layer/faults.py`): simula la caída del Generador de
+  Respuestas..
+- **Métricas extendidas** (`kafka_layer/kafka_metrics.py`) y **backlog/lag**
+  (`kafka_layer/lag_monitor.py`).
+
+## Ejecución de la Tarea 2 — Paso a Paso
+
+> Todos los comandos usan los **dos** archivos compose: el base
+> (`docker-compose.yml`) y el override de Kafka (`docker-compose.kafka.yml`).
+> Para un alias más corto:
+> ```bash
+> export COMPOSE="docker compose -f docker-compose.yml -f docker-compose.kafka.yml"
+> ```
+
+### Paso 1 — Levantar la infraestructura (Kafka + Redis)
 
 ```bash
-pip install -r requirements.txt
-
-# Simulación por defecto
-python main.py
-
-# Con parámetros personalizados
-python main.py --distribution uniform --total 5000 --ttl 2
-
-# Ejecutar todos los experimentos (54 combos)
-python run_experiments.py --total 5000
-
-# Subconjunto rápido de experimentos (8 combos)
-python run_experiments.py --quick --total 5000
-
-# Generar gráficos
-python plot_results.py --input metrics/experiments --output metrics/plots
+$COMPOSE up -d --build kafka redis
+$COMPOSE run --rm kafka-init   
 ```
 
-## Parámetros Configurables
+### Paso 2 — Correr los 7 escenarios
 
-| Parámetro | Opciones | Default |
-|---|---|---|
-| `--distribution` | `zipf`, `uniform` | `zipf` |
-| `--eviction-policy` | `allkeys-lru`, `allkeys-lfu`, `allkeys-random` | `allkeys-lru` |
-| `--max-memory` | `50mb`, `200mb`, `500mb` | `50mb` |
-| `--ttl` | Segundos | `2` |
-| `--total` | Número de consultas | `5000` |
-| `--qps` | Consultas/segundo (0=sin límite) | `0` |
+El runner `run_kafka_experiments.py` orquesta los siete escenarios de evaluación,
+inyecta fallos por variable de entorno, drena el pipeline entre cada uno y
+exporta un JSON por escenario en `metrics/kafka_experiments/`.
 
-## Estructura del Proyecto
+```bash
+# Los 7 escenarios 3000 mensajes c/u (~10 min)
+for s in sync single temporal retries spike recovery failrate_sweep; do
+  python3 run_kafka_experiments.py --scenario $s --total 3000
+done
 
-```
-.
-├── cache/
-│   └── cache_service.py       # Servicio de caché con Redis
-├── config.py                  # Configuración central
-├── data/
-│   ├── 967_buildings.csv      # Dataset Google Open Buildings
-│   └── loader.py              # Carga y partición del dataset
-├── docker-compose.yml         # Despliegue con Docker
-├── Dockerfile
-├── main.py                    # Orquestador principal
-├── metrics/
-│   ├── metrics_store.py       # Almacenamiento de métricas
-│   ├── results/               # Salida de simulaciones individuales
-│   ├── experiments/           # Salida de experimentos comparativos
-│   └── plots/                 # Gráficos generados por plot_results.py
-├── plot_results.py            # Generación de gráficos (11 plots)
-├── query_engine/
-│   └── queries.py             # Motor de consultas Q1-Q5
-├── requirements.txt
-├── run_experiments.py         # Automatización de experimentos
-└── traffic_generator/
-    └── generator.py           # Generador de tráfico sintético
+# Escalado horizontal (necesita más mensajes y 16 particiones)
+python3 run_kafka_experiments.py --scenario scaling --total 4000
 ```
 
-## Consultas Implementadas
+Escenarios: `sync` (baseline Tarea 1), `single` (Kafka + 1 consumer),
+`scaling` (1/2/4/8/16 consumers), `temporal` (caída temporal del backend),
+`retries` (fallos aleatorios), `spike` (pico de tráfico), `recovery`
+(síncrono vs Kafka), `failrate_sweep` (barrido de FAIL_RATE para sensibilidad
+del DLQ).
 
-| Query | Descripción | Cache key |
-|---|---|---|
-| **Q1** | Conteo de edificios en una zona | `count:{zone}:conf={c}` |
-| **Q2** | Área promedio y total de edificaciones | `area:{zone}:conf={c}` |
-| **Q3** | Densidad de edificaciones por km² | `density:{zone}:conf={c}` |
-| **Q4** | Comparación de densidad entre dos zonas | `compare:density:{zA}:{zB}:conf={c}` |
-| **Q5** | Distribución de confianza en una zona | `confidence_dist:{zone}:bins={b}` |
+### Paso 3 — Generar los gráficos comparativos
 
-Cada respuesta incluye una muestra de hasta 1000 registros (lat/lon/area/conf) para que las entradas
-ocupen ~70–140 KB en Redis y el catálogo total (~60 MB) supere el límite de 50 MB, forzando
-evictions reales.
+```bash
+$COMPOSE --profile plots run --rm plots python plot_kafka_results.py
+```
 
-## Catálogo de Consultas
+Genera 7 PNGs en `metrics/plots/kafka/`:
+`comparison_sync_vs_kafka`, `scaling_throughput`, `spike_backlog`,
+`fault_metrics`, `recovery_comparison`, `recovery_time`, `failrate_sweep`.
 
-El generador de tráfico construye un catálogo de ~1530 entradas únicas:
+### Paso 4 — Limpiar el entorno
 
-| Tipo | Parámetros | Entradas |
-|---|---|---|
-| Q1, Q2, Q3 | 5 zonas × 60 umbrales de confianza | 900 |
-| Q4 | C(5,2)=10 pares × 60 umbrales | 600 |
-| Q5 | 5 zonas × 6 valores de bins | 30 |
-| **Total** | | **1530** |
+```bash
+$COMPOSE down -v
+```
 
-## Configuraciones Experimentales
 
-| Dimensión | Valores | Observación |
-|---|---|---|
-| Distribuciones | `zipf`, `uniform` | Zipf s=1.5 |
-| Políticas | `allkeys-lru`, `allkeys-lfu`, `allkeys-random` | random ≈ FIFO |
-| Tamaño caché | `50mb`, `200mb`, `500mb` | 50mb fuerza evictions |
-| TTL | `2s`, `10s`, `300s` | 2s expira durante la simulación |
 
-Total: **54 combinaciones** (2 × 3 × 3 × 3).
+## Variables de Entorno (Tarea 2)
 
-## Métricas Recopiladas
+| Variable | Servicio | Default | Descripción |
+|---|---|---|---|
+| `TOTAL_QUERIES` | producer | `5000` | Consultas a publicar |
+| `QPS` | producer | `50` | Tasa de publicación (0 = sin límite) |
+| `SPIKE_QPS` / `SPIKE_DURATION_S` / `SPIKE_START_S` | producer | `0` / `0` / `5` | Ventana de pico de tráfico |
+| `MAX_RETRIES` | consumer | `3` | Reintentos antes de DLQ |
+| `FAIL_RATE` | consumer | `0.0` | Probabilidad de fallo por MISS (0–1) |
+| `RESPONSES_DOWN` | consumer | `false` | Caída permanente del backend |
+| `BACKEND_DOWN_START_S` / `BACKEND_DOWN_DURATION_S` | consumer | `0` / `0` | Ventana de caída temporal |
+| `ARTIFICIAL_LATENCY_MS` | consumer | `0` | Latencia artificial por MISS |
+| `RETRY_BACKOFF_S` | consumer | `2.0` | Espera entre reintentos |
+
+## Métricas del Pipeline (Tarea 2)
 
 | Métrica | Descripción |
 |---|---|
-| **Hit rate / Miss rate** | Fracción de consultas respondidas desde caché |
-| **Throughput** | Consultas por segundo |
-| **Latencia p50 / p95** | Percentiles de latencia de respuesta |
-| **Eviction rate** | Claves expulsadas por Redis (contador `evicted_keys`) |
-| **Cache efficiency** | `(hits × t_miss_avg − misses × t_hit_avg) / total` |
+| **retries_per_msg** | Reintentos promedio por mensaje completado |
+| **recovery_rate** | Fracción de mensajes fallidos que terminó recuperándose |
+| **dlq_rate** | Fracción de mensajes que acabó en la dead-letter queue |
+| **success_rate** | Fracción de mensajes procesados con éxito |
+| **backlog / lag** | Mensajes pendientes (high watermark − offset commiteado) |
 
-## Gráficos Generados (11)
+---
 
-| Archivo | Responde |
-|---|---|
-| `hit_rate_by_distribution` | Zipf vs Uniform: diferencia de hit rate |
-| `hit_rate_by_policy` | LRU vs LFU vs FIFO a 50mb (presión real) |
-| `hit_rate_by_cache_size` | Impacto de 50mb → 200mb → 500mb |
-| `hit_rate_by_ttl` | Efecto de TTL sobre hit rate global |
-| `ttl_per_query` | Efecto de TTL desglosado por tipo Q1–Q5 |
-| `latency_comparison` | p50 y p95 por política y distribución |
-| `throughput` | Throughput por política, tamaño y distribución |
-| `cache_efficiency` | Eficiencia por tamaño y política |
-| `per_query_breakdown` | Hit rate por tipo de consulta (Q1–Q5) |
-| `heatmap_hit_rate` | Matriz política × tamaño a TTL=300s |
-| `eviction_rate` | Evictions por tamaño, política y distribución |
 
-## Diseño de Experimentos
 
-Los parámetros se eligieron para que cada gráfico aísle **una sola variable**:
-
-- **Comparación de políticas** → `cache_size=50mb`, `TTL=300s` (sin expiraciones, solo maxmemory)
-- **Impacto del tamaño** → `TTL=300s` (sin expiraciones, solo capacidad)
-- **Impacto del TTL** → `cache_size=200mb` (sin maxmemory, solo expiraciones)
-- **Eviction rate** → `TTL=300s` para no mezclar el contador de evictions con TTL expiry
-
-## Salida
-
-Los resultados se guardan en `metrics/experiments/<tag>/`:
-
-- `events.csv` — Todos los eventos individuales con timestamps y latencias
-- `summary.json` — Resumen de métricas agregadas y por tipo de consulta
-- `comparison.json` — Tabla comparativa de todos los experimentos (raíz de `experiments/`)
