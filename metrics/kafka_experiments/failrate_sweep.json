@@ -1,0 +1,70 @@
+{
+  "scenario": "failrate_sweep",
+  "architecture": "kafka",
+  "total": 3000,
+  "consumers": 2,
+  "max_retries": 3,
+  "retry_backoff_s": 0.5,
+  "runs": [
+    {
+      "fail_rate": 0.1,
+      "processed": 3000,
+      "dlq": 0,
+      "retried": 30,
+      "recovered": 28,
+      "retries_per_msg": 0.01,
+      "recovery_rate": 1.0,
+      "dlq_rate": 0.0,
+      "success_rate": 1.0,
+      "throughput_qps": 387.9
+    },
+    {
+      "fail_rate": 0.3,
+      "processed": 3000,
+      "dlq": 0,
+      "retried": 108,
+      "recovered": 80,
+      "retries_per_msg": 0.036,
+      "recovery_rate": 1.0,
+      "dlq_rate": 0.0,
+      "success_rate": 1.0,
+      "throughput_qps": 295.2
+    },
+    {
+      "fail_rate": 0.5,
+      "processed": 2987,
+      "dlq": 13,
+      "retried": 229,
+      "recovered": 134,
+      "retries_per_msg": 0.0763,
+      "recovery_rate": 0.9116,
+      "dlq_rate": 0.0043,
+      "success_rate": 0.9957,
+      "throughput_qps": 304.0
+    },
+    {
+      "fail_rate": 0.7,
+      "processed": 2952,
+      "dlq": 48,
+      "retried": 430,
+      "recovered": 183,
+      "retries_per_msg": 0.1433,
+      "recovery_rate": 0.7922,
+      "dlq_rate": 0.016,
+      "success_rate": 0.984,
+      "throughput_qps": 303.9
+    },
+    {
+      "fail_rate": 0.9,
+      "processed": 2817,
+      "dlq": 183,
+      "retried": 1002,
+      "recovered": 267,
+      "retries_per_msg": 0.334,
+      "recovery_rate": 0.5933,
+      "dlq_rate": 0.061,
+      "success_rate": 0.939,
+      "throughput_qps": 342.9
+    }
+  ]
+}

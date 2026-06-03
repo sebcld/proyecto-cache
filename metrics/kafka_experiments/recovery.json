@@ -1,0 +1,21 @@
+{
+  "scenario": "recovery_compare",
+  "total": 3000,
+  "fault": {
+    "BACKEND_DOWN_START_S": "0",
+    "BACKEND_DOWN_DURATION_S": "3",
+    "RETRY_BACKOFF_S": "1.0",
+    "MAX_RETRIES": "5"
+  },
+  "kafka": {
+    "messages_failed_at_least_once": 2766,
+    "recovered_by_retry": 2766,
+    "lost_to_dlq": 0,
+    "recovery_rate": 1.0
+  },
+  "synchronous_equivalent": {
+    "messages_lost": 2766,
+    "recovery_rate": 0.0
+  },
+  "messages_saved_by_kafka": 2766
+}

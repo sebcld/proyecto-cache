@@ -1,0 +1,9 @@
+{
+  "used_memory_human": "16.79M",
+  "used_memory_peak_human": "16.85M",
+  "maxmemory_human": "200.00M",
+  "maxmemory_policy": "allkeys-lru",
+  "keys": 246,
+  "ttl_default": 300,
+  "redis_evicted_keys": 0
+}

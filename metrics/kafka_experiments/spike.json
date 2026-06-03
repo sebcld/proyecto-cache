@@ -1,0 +1,118 @@
+{
+  "scenario": "spike",
+  "architecture": "kafka",
+  "total": 3000,
+  "consumers": 1,
+  "spike": {
+    "SPIKE_QPS": "500",
+    "SPIKE_DURATION_S": "10",
+    "SPIKE_START_S": "3"
+  },
+  "elapsed_s": 12.31,
+  "max_backlog": 199,
+  "backlog_samples": [
+    {
+      "t": 0.6,
+      "backlog": 0
+    },
+    {
+      "t": 1.3,
+      "backlog": 0
+    },
+    {
+      "t": 1.8,
+      "backlog": 0
+    },
+    {
+      "t": 2.4,
+      "backlog": 1
+    },
+    {
+      "t": 3.0,
+      "backlog": 0
+    },
+    {
+      "t": 3.5,
+      "backlog": 0
+    },
+    {
+      "t": 4.1,
+      "backlog": 0
+    },
+    {
+      "t": 4.7,
+      "backlog": 32
+    },
+    {
+      "t": 5.2,
+      "backlog": 64
+    },
+    {
+      "t": 5.8,
+      "backlog": 120
+    },
+    {
+      "t": 6.4,
+      "backlog": 106
+    },
+    {
+      "t": 6.9,
+      "backlog": 139
+    },
+    {
+      "t": 7.5,
+      "backlog": 114
+    },
+    {
+      "t": 8.0,
+      "backlog": 126
+    },
+    {
+      "t": 8.5,
+      "backlog": 117
+    },
+    {
+      "t": 9.1,
+      "backlog": 124
+    },
+    {
+      "t": 9.8,
+      "backlog": 178
+    },
+    {
+      "t": 10.5,
+      "backlog": 193
+    },
+    {
+      "t": 11.0,
+      "backlog": 199
+    },
+    {
+      "t": 11.6,
+      "backlog": 195
+    },
+    {
+      "t": 12.2,
+      "backlog": 0
+    }
+  ],
+  "metrics": {
+    "processed": 3000,
+    "hits": 2754,
+    "misses": 246,
+    "retried": 0,
+    "recovered": 0,
+    "dlq": 0,
+    "terminal": 3000,
+    "retries_per_msg": 0.0,
+    "recovery_rate": 0.0,
+    "dlq_rate": 0.0,
+    "success_rate": 1.0,
+    "hit_rate": 0.918,
+    "miss_rate": 0.082,
+    "latency_p50_ms": 0.8955,
+    "latency_p95_ms": 5.0425,
+    "hit_p50_ms": 0.8835,
+    "miss_p50_ms": 5.2068
+  }
+}

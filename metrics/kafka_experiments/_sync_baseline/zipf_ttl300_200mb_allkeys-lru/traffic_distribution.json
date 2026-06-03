@@ -1,0 +1,99 @@
+{
+  "distribution": "zipf",
+  "zipf_param": 1.5,
+  "catalog_size": 1530,
+  "top_queries": [
+    {
+      "rank": 1,
+      "probability": 0.390434,
+      "query_type": "Q2",
+      "params": {
+        "zone_id": "Z5",
+        "confidence_min": 0.58
+      }
+    },
+    {
+      "rank": 2,
+      "probability": 0.138039,
+      "query_type": "Q2",
+      "params": {
+        "zone_id": "Z5",
+        "confidence_min": 0.242
+      }
+    },
+    {
+      "rank": 3,
+      "probability": 0.075139,
+      "query_type": "Q3",
+      "params": {
+        "zone_id": "Z2",
+        "confidence_min": 0.354
+      }
+    },
+    {
+      "rank": 4,
+      "probability": 0.048804,
+      "query_type": "Q4",
+      "params": {
+        "zone_a": "Z3",
+        "zone_b": "Z4",
+        "confidence_min": 0.564
+      }
+    },
+    {
+      "rank": 5,
+      "probability": 0.034921,
+      "query_type": "Q3",
+      "params": {
+        "zone_id": "Z1",
+        "confidence_min": 0.773
+      }
+    },
+    {
+      "rank": 6,
+      "probability": 0.026566,
+      "query_type": "Q1",
+      "params": {
+        "zone_id": "Z3",
+        "confidence_min": 0.708
+      }
+    },
+    {
+      "rank": 7,
+      "probability": 0.021081,
+      "query_type": "Q2",
+      "params": {
+        "zone_id": "Z4",
+        "confidence_min": 0.708
+      }
+    },
+    {
+      "rank": 8,
+      "probability": 0.017255,
+      "query_type": "Q1",
+      "params": {
+        "zone_id": "Z4",
+        "confidence_min": 0.757
+      }
+    },
+    {
+      "rank": 9,
+      "probability": 0.014461,
+      "query_type": "Q4",
+      "params": {
+        "zone_a": "Z2",
+        "zone_b": "Z3",
+        "confidence_min": 0.354
+      }
+    },
+    {
+      "rank": 10,
+      "probability": 0.012347,
+      "query_type": "Q3",
+      "params": {
+        "zone_id": "Z1",
+        "confidence_min": 0.242
+      }
+    }
+  ]
+}
