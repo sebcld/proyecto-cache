@@ -1,37 +1,43 @@
 
 import os
 
-# 
-# Dentro de docker: "kafka:9092" (listener interno PLAINTEXT)
-# Desde el host:    "localhost:9094" (listener PLAINTEXT_HOST)
+
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 
-# Topcos del sistema
-# 
+
 TOPIC_QUERIES = "queries"            # flujo principal: producer -> consumers
 TOPIC_RETRY   = "queries.retry"      # reintentos tras fallo temporal
 TOPIC_DLQ     = "queries.dlq"        # mensajes que excedieron MAX_RETRIES
 
+# Tarea 3: topico dedicado para eventos individuales de metrica.
+
+TOPIC_METRICS = os.getenv("KAFKA_METRICS_TOPIC", "metrics-topic")
+
 # Particionado:
 #   - queries y queries.retry con 8 particiones permite escalar hasta 8
 #     consumers concurrentes dentro del mismo grupo (cada uno toma ≥1 particonn).
+#   - metrics-topic con 8 particiones para no ser cuello de botella del
+#     plano de observabilidad y permitir que Spark consuma en paralelo.
 NUM_PARTITIONS_QUERIES = int(os.getenv("KAFKA_PARTITIONS_QUERIES", 8))
 NUM_PARTITIONS_RETRY   = int(os.getenv("KAFKA_PARTITIONS_RETRY", 8))
 NUM_PARTITIONS_DLQ     = int(os.getenv("KAFKA_PARTITIONS_DLQ", 1))
+NUM_PARTITIONS_METRICS = int(os.getenv("KAFKA_PARTITIONS_METRICS", 8))
 
-# Replicacion: 1 
+# Replicacion: 1
 REPLICATION_FACTOR = int(os.getenv("KAFKA_REPLICATION_FACTOR", 1))
 
 # retncion: 1h en topics activos.
 RETENTION_MS_QUERIES = os.getenv("KAFKA_RETENTION_MS_QUERIES", "3600000")
 RETENTION_MS_RETRY   = os.getenv("KAFKA_RETENTION_MS_RETRY",   "3600000")
 RETENTION_MS_DLQ     = os.getenv("KAFKA_RETENTION_MS_DLQ",     "86400000")
+RETENTION_MS_METRICS = os.getenv("KAFKA_RETENTION_MS_METRICS", "3600000")
 
 # Estructura usada por topics.py para crear todo de forma idempotente.
 TOPIC_CONFIGS = {
     TOPIC_QUERIES: {"partitions": NUM_PARTITIONS_QUERIES, "retention_ms": RETENTION_MS_QUERIES},
     TOPIC_RETRY:   {"partitions": NUM_PARTITIONS_RETRY,   "retention_ms": RETENTION_MS_RETRY},
     TOPIC_DLQ:     {"partitions": NUM_PARTITIONS_DLQ,     "retention_ms": RETENTION_MS_DLQ},
+    TOPIC_METRICS: {"partitions": NUM_PARTITIONS_METRICS, "retention_ms": RETENTION_MS_METRICS},
 }
 
 # 

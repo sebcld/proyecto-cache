@@ -1,0 +1,155 @@
+
+services:
+
+  spark-streaming:
+    image: apache/spark:3.5.0
+    container_name: spark-streaming
+    profiles: ["streaming"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    # apache/spark corre como user 185 (spark). Ivy/checkpoint van a /tmp
+    # para no chocar con permisos de /opt/spark/.
+    user: "185:185"
+    environment:
+      - HOME=/tmp
+    volumes:
+      # Codigo del job montado read-only.
+      - ./spark_job:/opt/app/spark_job:ro
+
+    networks:
+      - cache-net
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        mkdir -p /tmp/.ivy2 /tmp/spark-checkpoint && \
+        /opt/spark/bin/spark-submit \
+          --master local[2] \
+          --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 \
+          --conf spark.jars.ivy=/tmp/.ivy2 \
+          --conf spark.driver.memory=512m \
+          --conf spark.executor.memory=512m \
+          /opt/app/spark_job/metrics_streaming.py \
+          --output ${SPARK_OUTPUT:-console} \
+          --kafka-bootstrap kafka:9092 \
+          --topic metrics-topic \
+          --starting-offsets ${SPARK_STARTING_OFFSETS:-earliest} \
+          --window-duration "${SPARK_WINDOW:-1 minute}" \
+          --slide-duration "${SPARK_SLIDE:-30 seconds}" \
+          --watermark "${SPARK_WATERMARK:-2 minutes}" \
+          --trigger "${SPARK_TRIGGER:-10 seconds}" \
+          --es-nodes ${ES_NODES:-elasticsearch} \
+          --es-port ${ES_PORT:-9200} \
+          --es-index ${ES_INDEX:-metrics-aggregated}
+
+  # Elasticsearch (perfil 'elk'): almacen indexable de los resultados agregados.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.4
+    container_name: elasticsearch
+    profiles: ["elk"]
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - cluster.name=tarea3-cluster
+      - node.name=es01
+      - bootstrap.memory_lock=true
+      # Disable disk watermark threshold: en hosts con poco espacio libre
+      # (disco al >90%) ES rechaza asignar shards y el cluster se vuelve RED.
+      # Para esta demo academica desactivamos el control; en produccion no.
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      # Heap de 512MB: suficiente para los volumenes de Tarea 3 sin saturar
+      # un host de 8GB que tambien corre Kafka + Spark + consumer.
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      # green o yellow son aceptables para single-node (yellow es lo normal).
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    ports:
+      - "9200:9200"
+    networks:
+      - cache-net
+
+
+  elasticsearch-init:
+    image: curlimages/curl:8.5.0
+    container_name: elasticsearch-init
+    profiles: ["elk"]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - cache-net
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "[es-init] template zero-replicas (global)..."
+        curl -sf -X PUT "http://elasticsearch:9200/_index_template/zero-replicas-default" \
+          -H "Content-Type: application/json" \
+          -d '{"index_patterns":["*"],"priority":500,"template":{"settings":{"number_of_replicas":0}}}' >/dev/null
+        echo "  OK"
+
+        echo "[es-init] template metrics-aggregated (mapping date para window_start_iso)..."
+        curl -sf -X PUT "http://elasticsearch:9200/_index_template/metrics-aggregated" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "index_patterns": ["metrics-aggregated*"],
+            "priority": 600,
+            "template": {
+              "settings": {"number_of_replicas": 0, "number_of_shards": 1},
+              "mappings": {
+                "properties": {
+                  "window_start_ms":  {"type": "long"},
+                  "window_start_iso": {"type": "date"},
+                  "window_end_iso":   {"type": "date"},
+                  "throughput":       {"type": "long"},
+                  "latency_p50_ms":   {"type": "double"},
+                  "latency_p95_ms":   {"type": "double"},
+                  "hit_rate":         {"type": "double"},
+                  "retry_rate":       {"type": "double"},
+                  "dlq_count":        {"type": "long"},
+                  "total_events":     {"type": "long"}
+                }
+              }
+            }
+          }' >/dev/null
+        echo "  OK"
+        echo "[es-init] listo."
+
+  # Kibana (perfil 'elk'): UI de dashboards/exploracion. Apunta al ES interno.
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.4
+    container_name: kibana
+    profiles: ["elk"]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      elasticsearch-init:
+        condition: service_completed_successfully
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana
+      - SERVER_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    ports:
+      - "5601:5601"
+    networks:
+      - cache-net

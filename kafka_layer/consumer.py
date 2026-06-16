@@ -46,6 +46,7 @@ from kafka_config import (
 )
 from kafka_layer.message import QueryMessage
 from kafka_layer.faults import FaultInjector, FaultyEngine
+from kafka_layer.metrics_publisher import MetricsPublisher
 
 from config import (
     DATASET_PATH, REDIS_HOST, REDIS_PORT, REDIS_DB,
@@ -127,9 +128,12 @@ class ConsumerWorker:
             ttl=CACHE_TTL_SECONDS,
         )
 
-        #  Kafka 
+        #  Kafka
         self._consumer = make_consumer()
         self._producer = make_producer()
+
+        # Tarea 3: publicacion de eventos de metrica a metrics-topic.
+        self._metrics_publisher = MetricsPublisher()
 
     #  Republicacion a retry / DLQ 
 
@@ -141,6 +145,20 @@ class ConsumerWorker:
             self._redis.incr("metrics:dlq")
             print(f"[consumer:{self.worker_id}] ✗ DLQ {msg.query_id} "
                   f"(retry_count={msg.retry_count}) — {reason}")
+
+            # Tarea 3: publicar evento terminal DLQ a metrics-topic.
+            try:
+                elapsed_ms = (time.time() - msg.created_at) * 1000.0
+                self._metrics_publisher.publish_terminal(
+                    msg,
+                    final_status="dlq",
+                    latency_ms=elapsed_ms,
+                    cache_result="miss",
+                    consumer_id=self.worker_id,
+                )
+            except Exception as e:
+                print(f"[consumer:{self.worker_id}] WARN metrics publish failed: {e}",
+                      file=sys.stderr)
         else:
             target = TOPIC_RETRY
             payload = msg.with_retry()
@@ -156,12 +174,26 @@ class ConsumerWorker:
     def _handle(self, msg: QueryMessage) -> None:
         """Procesa una consulta; en caso de fallo la enruta a retry/DLQ."""
         try:
-            # El fallo se inyecta dentro del motor (solo en cache MISS).
-            self._cache.process_query(msg.query_type, **msg.params)
+        
+            result = self._cache.process_query(msg.query_type, **msg.params)
             self._redis.incr("metrics:processed")
             if msg.retry_count > 0:
                 # Se recupero tras uno o mas reintentos.
                 self._redis.incr("metrics:recovered")
+
+            # Tarea 3: publicar evento terminal SUCCESS a metrics-topic.
+            try:
+                self._metrics_publisher.publish_terminal(
+                    msg,
+                    final_status="success",
+                    latency_ms=float(result.get("total_latency_ms", 0.0)),
+                    cache_result="hit" if result.get("from_cache") else "miss",
+                    consumer_id=self.worker_id,
+                )
+            except Exception as e:
+                print(f"[consumer:{self.worker_id}] WARN metrics publish failed: {e}",
+                      file=sys.stderr)
+
         except Exception as e:
             self._route_failure(msg, reason=str(e))
 
@@ -212,6 +244,8 @@ class ConsumerWorker:
         finally:
             print(f"[consumer:{self.worker_id}] Cerrando: flush + commit final...")
             self._producer.flush(10)
+            # Tarea 3: flush del producer de metricas 
+            self._metrics_publisher.close()
             self._consumer.close()
         return 0
 
